@@ -6,25 +6,14 @@ from sklearn.ensemble import RandomForestClassifier
 import os
 
 # --- 1. 페이지 설정 ---
-st.set_page_config(
-    page_title="Lending Club",
-    page_icon="💰",
-    layout="centered"
-)
+st.set_page_config(page_title="Lending Club", page_icon="💰", layout="centered")
 
 # --- 2. 디자인 및 스타일링 ---
 def set_bg_color():
     st.markdown(
-        """
-        <style>
-        .stApp {
-            background-color: #f0fff0; /* honeydew 색상 */
-        }
-        </style>
-        """,
+        """<style>.stApp {background-color: #f0fff0;}</style>""",
         unsafe_allow_html=True
     )
-
 set_bg_color()
 
 # --- 3. 데이터 로딩 및 모델 학습 함수 ---
@@ -32,25 +21,39 @@ set_bg_color()
 def load_data():
     file_path = 'loan_data.csv'
     if not os.path.exists(file_path):
-        # 현실적인 데이터 불균형 상황을 유지 (80% 정상 상환, 20% 불이행)
+        # --- 핵심 수정: 의미 있는 데이터 생성 로직 ---
+        n_samples = 1000
+        credit_score = np.random.randint(300, 851, size=n_samples)
+        annual_income = np.random.randint(20000, 150001, size=n_samples)
+        
+        # '불이행' 확률을 계산하는 로직: 신용점수가 낮고 소득이 낮을수록 불이행 확률 증가
+        # 점수를 0~1 사이로 정규화
+        score_norm = (credit_score - 300) / (850 - 300)
+        income_norm = (annual_income - 20000) / (150000 - 20000)
+        
+        # 불이행 확률 계산 (신용/소득 점수가 낮을수록 prob_default가 높아짐)
+        prob_default = 0.8 * (1 - score_norm) + 0.2 * (1 - income_norm)
+        
+        # 계산된 확률에 따라 Loan Status 생성 (0: 불이행, 1: 정상 상환)
+        loan_status = (np.random.rand(n_samples) > prob_default).astype(int)
+        
         data = {
-            'Credit Score': np.random.randint(300, 851, size=1000),
-            'Annual Income': np.random.randint(20000, 150001, size=1000),
-            'Loan Amount': np.random.randint(1000, 50000, size=1000),
-            'Loan Term': np.random.choice([5, 10, 15, 30], size=1000),
-            'Purpose': np.random.choice(['주택', '자동차', '사업', '교육', '개인'], size=1000),
-            'Loan Status': np.random.choice([0, 1], size=1000, p=[0.2, 0.8])
+            'Credit Score': credit_score,
+            'Annual Income': annual_income,
+            'Loan Amount': np.random.randint(1000, 50000, size=n_samples),
+            'Loan Term': np.random.choice([5, 10, 15, 30], size=n_samples),
+            'Purpose': np.random.choice(['주택', '자동차', '사업', '교육', '개인'], size=n_samples),
+            'Loan Status': loan_status
         }
         df = pd.DataFrame(data)
-        for col in ['Credit Score', 'Annual Income']:
-            df.loc[df.sample(frac=0.05).index, col] = np.nan
+        # ------------------------------------------------
+        
         df.to_csv(file_path, index=False)
     
     df = pd.read_csv(file_path)
+    # 결측치는 간단하게 평균으로 대체
     for col in df.select_dtypes(include=np.number).columns:
         df[col].fillna(df[col].mean(), inplace=True)
-    for col in df.select_dtypes(include='object').columns:
-        df[col].fillna(df[col].mode()[0], inplace=True)
     return df
 
 @st.cache_resource
@@ -60,8 +63,7 @@ def train_model(df):
     y = df_processed['Loan Status']
     X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     
-    # --- 핵심 수정 사항: class_weight='balanced' 적용 ---
-    # 이 옵션을 통해 모델이 데이터 불균형을 인지하고 소수 클래스에 가중치를 부여함
+    # 데이터 불균형 문제를 해결하기 위해 class_weight 적용
     model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
     
     model.fit(X_train, y_train)
@@ -80,27 +82,21 @@ st.subheader("아래 정보를 입력하여 대출 상환 능력을 예측해 �
 
 with st.form(key='loan_prediction_form'):
     col1, col2 = st.columns(2)
-    
     with col1:
         credit_score = st.slider('신용 점수 (Credit Score)', 300, 850, 650)
         loan_amount = st.number_input('대출 금액 (Loan Amount)', min_value=0, value=10000, step=1000)
-
     with col2:
         annual_income = st.number_input('연 소득 (Annual Income)', min_value=0, value=50000, step=1000)
         loan_term = st.selectbox('대출 기간(년) (Loan Term)', sorted(df['Loan Term'].unique()))
-    
     purpose = st.selectbox('대출 목적 (Purpose)', df['Purpose'].unique())
-    
     submitted = st.form_submit_button("예측하기")
 
 if submitted:
     input_data = {
         'Credit Score': [credit_score], 'Annual Income': [annual_income],
-        'Loan Amount': [loan_amount], 'Loan Term': [loan_term],
-        'Purpose': [purpose]
+        'Loan Amount': [loan_amount], 'Loan Term': [loan_term], 'Purpose': [purpose]
     }
     input_df = pd.DataFrame(input_data)
-    
     input_processed = pd.get_dummies(input_df, columns=['Purpose'])
     input_final = input_processed.reindex(columns=trained_columns, fill_value=0)
     
@@ -116,10 +112,8 @@ if submitted:
             st.success("✅ **대출 상환 가능성이 높습니다.**")
         else:
             st.error("🚨 **대출 불이행 위험이 있습니다.**")
-        
         st.write(f"**정상 상환 확률:** {prediction_proba[1]:.2%}")
         st.write(f"**불이행 확률:** {prediction_proba[0]:.2%}")
-
     with res_col2:
         st.bar_chart(pd.DataFrame({'확률': prediction_proba}, index=['불이행', '정상 상환']))
 else:
