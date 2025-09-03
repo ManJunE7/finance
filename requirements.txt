@@ -1,12 +1,4 @@
-streamlit
-geopandas
-folium
-osmnx
-shapely
-requests
-streamlit-folium
-openai
-geopy
-pandas
-python-dotenv 
 numpy
+pandas
+scikit-learn
+streamlit
